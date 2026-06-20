@@ -178,6 +178,7 @@ def main() -> None:
 		html = response.read().decode("utf-8", errors="replace")
 
 	qualifying_lines: list[str] = []
+	met_threshold_lines: list[str] = []
 	merchant_states = state.setdefault("merchants", {})
 
 	for merchant, minimum_miles in TARGET_MERCHANTS.items():
@@ -196,15 +197,20 @@ def main() -> None:
 		merchant_states[merchant] = updated_state
 
 		print(f"{merchant}: {miles} (min {minimum_miles})")
-		if should_send and value >= float(minimum_miles):
-			qualifying_lines.append(f"{merchant}: {miles} (>= {minimum_miles})")
+		if value >= float(minimum_miles):
+			met_threshold_lines.append(f"{merchant}: {miles} (>= {minimum_miles})")
+			if should_send:
+				qualifying_lines.append(f"{merchant}: {miles} (>= {minimum_miles})")
 
 	save_state(state)
 
 	if qualifying_lines:
 		send_email(["Merchants meeting threshold:", "", *qualifying_lines])
 	else:
-		print("No merchants met threshold. No email sent.")
+		if met_threshold_lines:
+			print("Merchants met threshold, but no new alert condition was triggered. No email sent.")
+		else:
+			print("No merchants met threshold. No email sent.")
 
 
 if __name__ == "__main__":
