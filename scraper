@@ -13,7 +13,6 @@ TARGET_MERCHANTS = {
 	"Adidas": 4,
 	"giftcards.com": 2.5,
 }
-EMAIL_TO_DEFAULT = "tomasgalluzzi@gmail.com"
 STATE_DIR = ".state"
 STATE_FILE = os.path.join(STATE_DIR, "alerts_state.json")
 
@@ -146,9 +145,12 @@ def send_email(lines: list[str]) -> None:
 	if not smtp_username or not smtp_password or not from_email:
 		print("Email not sent: set SMTP_USERNAME, SMTP_PASSWORD, and optionally EMAIL_FROM.")
 		return
+	email_to = os.environ.get("EMAIL_TO", "").strip()
+	if not email_to:
+		print("Email not sent: set EMAIL_TO.")
+		return
 
 	message = EmailMessage()
-	email_to = os.environ.get("EMAIL_TO", EMAIL_TO_DEFAULT)
 	message["Subject"] = "AAdvantage eShopping alerts"
 	message["From"] = from_email
 	message["To"] = email_to
