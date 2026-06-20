@@ -1,4 +1,4 @@
-name: Miles Alert
+name: Scraper Alerts
 
 on:
   schedule:
@@ -36,7 +36,7 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
-        run: python scraper
+        run: python scraper_AAshopping
 
       - name: Save state cache
         if: always()
