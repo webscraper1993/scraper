@@ -4,7 +4,6 @@ import os
 import re
 import smtplib
 import urllib.request
-from datetime import datetime, timezone
 from email.message import EmailMessage
 
 
@@ -12,6 +11,7 @@ URL = "https://www.aadvantageeshopping.com/merchantlisthtml____.htm"
 TARGET_MERCHANTS = {
 	"Adidas": 4,
 	"giftcards.com": 2.5,
+	"eBay.com": 1.5,
 }
 STATE_DIR = ".state"
 STATE_FILE = os.path.join(STATE_DIR, "alerts_state.json")
@@ -41,13 +41,13 @@ def normalize(text: str) -> str:
 
 def load_state() -> dict:
 	if not os.path.exists(STATE_FILE):
-		return {"date": "", "merchants": {}}
+		return {"merchants": {}}
 
 	try:
 		with open(STATE_FILE, "r", encoding="utf-8") as state_file:
 			return json.load(state_file)
 	except (json.JSONDecodeError, OSError):
-		return {"date": "", "merchants": {}}
+		return {"merchants": {}}
 
 
 def save_state(state: dict) -> None:
@@ -56,38 +56,27 @@ def save_state(state: dict) -> None:
 		json.dump(state, state_file, indent=2, sort_keys=True)
 
 
-def reset_state_for_new_day(state: dict) -> dict:
-	today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-	if state.get("date") != today:
-		return {"date": today, "merchants": {}}
-	return state
-
-
 def should_send_alert(merchant_state: dict, threshold: float, current_value: float) -> tuple[bool, dict]:
 	last_seen = merchant_state.get("last_seen_value")
 	last_emailed = merchant_state.get("last_emailed_value")
-	dropped_below = bool(merchant_state.get("dropped_below_threshold", False))
-	recovered_once = bool(merchant_state.get("recovered_after_drop", False))
+	was_below = merchant_state.get("was_below_threshold")
+
+	if was_below is None:
+		# Backward-compatible migration from older state shape.
+		# If we have already emailed while seen at/above threshold, do not resend.
+		if last_emailed is not None and last_seen is not None and last_seen >= threshold:
+			was_below = False
+		else:
+			was_below = True
 
 	send = False
 
 	if current_value < threshold:
-		dropped_below = True
-		recovered_once = False
+		was_below = True
 	else:
-		if last_emailed is None:
+		if was_below:
 			send = True
-		elif not dropped_below:
-			# Before any same-day dip below threshold, alert on any qualifying change.
-			send = current_value != last_emailed
-		else:
-			# After a same-day dip below threshold, skip the first recovery reading,
-			# then alert only on upward moves.
-			if not recovered_once:
-				recovered_once = True
-				send = False
-			else:
-				send = last_seen is not None and current_value > last_seen
+		was_below = False
 
 	if send:
 		last_emailed = current_value
@@ -95,8 +84,7 @@ def should_send_alert(merchant_state: dict, threshold: float, current_value: flo
 	updated_state = {
 		"last_seen_value": current_value,
 		"last_emailed_value": last_emailed,
-		"dropped_below_threshold": dropped_below,
-		"recovered_after_drop": recovered_once,
+		"was_below_threshold": was_below,
 	}
 	return send, updated_state
 
@@ -166,7 +154,7 @@ def send_email(lines: list[str]) -> None:
 
 def main() -> None:
 	load_dotenv()
-	state = reset_state_for_new_day(load_state())
+	state = load_state()
 
 	request = urllib.request.Request(
 		URL,
