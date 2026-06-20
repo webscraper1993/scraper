@@ -7,12 +7,15 @@ import urllib.request
 from email.message import EmailMessage
 
 
-URL = "https://www.aadvantageeshopping.com/merchantlisthtml____.htm"
 TARGET_MERCHANTS = {
 	"Adidas": 4,
 	"giftcards.com": 2.5,
 	"eBay.com": 1.5,
+	"Sur La Table": 3,
 }
+
+URL = "https://www.aadvantageeshopping.com/merchantlisthtml____.htm"
+
 STATE_DIR = ".state"
 STATE_FILE = os.path.join(STATE_DIR, "alerts_state.json")
 
