@@ -2,11 +2,8 @@ name: Scraper Alerts
 
 on:
   schedule:
-    # GitHub can delay/skip jobs at busy times (especially minute 0).
-    # Run at staggered minutes to improve reliability.
-    - cron: "17 * * * *"
-    - cron: "35 * * * *"
-    - cron: "47 * * * *"
+    # Run at minute 45 of every hour (UTC).
+    - cron: "45 * * * *"
   workflow_dispatch:
 
 jobs:
