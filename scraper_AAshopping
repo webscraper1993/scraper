@@ -12,8 +12,10 @@ TARGET_MERCHANTS = {
 	"Giftcards.com": 2,
 	"eBay.com": 1.5,
 	"Sur La Table": 3,
-	"Amazon.com": 0.1,
-	"Apple": 2
+	"Apple": 2,
+
+	# no miles expected, but always checking:
+	"Amazon.com": 0.1
 }
 
 URL = "https://www.aadvantageeshopping.com/merchantlisthtml____.htm"
@@ -42,6 +44,14 @@ def load_dotenv(file_path: str = ".env") -> None:
 
 def normalize(text: str) -> str:
 	return re.sub(r"\s+", "", text).lower()
+
+
+def merchant_key(text: str) -> str:
+	# Canonicalize merchant names so minor label differences still match.
+	value = text.lower()
+	value = re.sub(r"\.com\b", "", value)
+	value = re.sub(r"[^a-z0-9]+", "", value)
+	return value
 
 
 def load_state() -> dict:
@@ -102,27 +112,26 @@ def parse_miles_value(miles_text: str) -> float | None:
 
 
 def extract_miles(html: str, merchant_name: str) -> str | None:
-	# Parse each merchant row from the server-rendered list and match by merchant name.
-	target = normalize(merchant_name)
-	rows = re.findall(r"<li\b[^>]*>.*?</li>", html, flags=re.IGNORECASE | re.DOTALL)
+	# Parse by merchant-name spans directly; the li markup can be malformed in this feed.
+	target = merchant_key(merchant_name)
+	name_matches = list(re.finditer(
+		r'<span\s+class="mn_merchName"[^>]*>(.*?)</span>',
+		html,
+		flags=re.IGNORECASE | re.DOTALL,
+	))
 
-	for row in rows:
-		name_match = re.search(
-			r'<span\s+class="mn_merchName"[^>]*>(.*?)</span>',
-			row,
-			flags=re.IGNORECASE | re.DOTALL,
-		)
-		if not name_match:
-			continue
-
-		name = re.sub(r"<[^>]+>", "", name_match.group(1))
+	for index, match in enumerate(name_matches):
+		name = re.sub(r"<[^>]+>", "", match.group(1))
 		name = re.sub(r"\s+", " ", name).strip()
-		if normalize(name) != target:
+		if merchant_key(name) != target:
 			continue
 
-		# Prefer the latest/active value in the row (usually the last miles value present).
-		matches = re.findall(r"(\d[\d,]*(?:\.\d+)?\s*miles(?:\/\$)?)", row, flags=re.IGNORECASE)
+		# Keep extraction inside this merchant entry to avoid bleeding into the next merchant.
+		next_start = name_matches[index + 1].start() if index + 1 < len(name_matches) else min(len(html), match.end() + 2500)
+		tail = html[match.end():next_start]
+		matches = re.findall(r"(\d[\d,]*(?:\.\d+)?\s*miles?(?:\/\$)?)", tail, flags=re.IGNORECASE)
 		if matches:
+			# Elevated offers often include old and new values; latest value is typically the current one.
 			return matches[-1]
 
 	return None
