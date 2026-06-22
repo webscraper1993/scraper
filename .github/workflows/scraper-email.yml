@@ -2,8 +2,8 @@ name: Scraper Alerts
 
 on:
   schedule:
-    # Run at minute 11 of every hour (UTC) to avoid top-of-hour queue congestion.
-    - cron: "11 * * * *"
+    # Run at minute 5 of every hour (UTC).
+    - cron: "5 * * * *"
   workflow_dispatch:
 
 jobs:
