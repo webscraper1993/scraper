@@ -12,7 +12,7 @@ TARGET_MERCHANTS = {
 	"Giftcards.com": 2,
 	"eBay.com": 1.5,
 	"Sur La Table": 3,
-	"Apple": 2,
+	"Apple": 3,
 
 	# no miles expected, but always checking:
 	"Amazon.com": 0.1
