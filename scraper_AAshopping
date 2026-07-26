@@ -13,6 +13,7 @@ TARGET_MERCHANTS = {
 	"eBay.com": 1.5,
 	"Sur La Table": 3,
 	"Apple": 3,
+	"Away": 2,
 
 	# no miles expected, but always checking:
 	"Amazon.com": 0.1
