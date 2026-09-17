@@ -6,7 +6,6 @@ import smtplib
 import urllib.request
 from email.message import EmailMessage
 
-
 TARGET_MERCHANTS = {
 	"Adidas": 5,
 	"Giftcards.com": 2,
