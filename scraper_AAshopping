@@ -11,11 +11,13 @@ from zoneinfo import ZoneInfo
 
 TARGET_MERCHANTS = {
 	"Adidas": 5,
-	"Giftcards.com": 2,
-	"eBay.com": 1.5,
-	"Sur La Table": 3,
 	"Apple": 3,
 	"Away": 2,
+	"CVS": 3,
+	"eBay.com": 1.5,
+	"Giftcards.com": 2,
+	"Sur La Table": 3,
+	"Walgreens": 3,
 
 	# no miles expected, but always checking:
 	"Amazon.com": 0.1
