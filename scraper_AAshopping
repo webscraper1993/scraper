@@ -5,8 +5,9 @@ import os
 import re
 import smtplib
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
 from email.message import EmailMessage
+from zoneinfo import ZoneInfo
 
 TARGET_MERCHANTS = {
 	"Adidas": 5,
@@ -205,7 +206,7 @@ def main() -> None:
 
 	with urllib.request.urlopen(request, timeout=30) as response:
 		html = response.read().decode("utf-8", errors="replace")
-	day = datetime.now(timezone.utc).date().isoformat()
+	day = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
 
 	qualifying_lines: list[str] = []
 	met_threshold_lines: list[str] = []

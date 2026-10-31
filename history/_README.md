@@ -5,7 +5,7 @@ as a table. You can also open or import these files in Excel.
 
 | Column | Meaning |
 | --- | --- |
-| `date` | Observation date in UTC, formatted as YYYY-MM-DD |
+| `date` | Observation date in Eastern Time (ET), formatted as YYYY-MM-DD |
 | `miles` | Highest numeric miles offer observed by the scraper on that date |
 
 Every run checks the current `TARGET_MERCHANTS` list in `scraper_AAshopping`.
