@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+import csv
 import json
 import os
 import re
 import smtplib
 import urllib.request
+from datetime import datetime, timezone
 from email.message import EmailMessage
 
 TARGET_MERCHANTS = {
@@ -22,6 +24,29 @@ URL = "https://www.aadvantageeshopping.com/merchantlisthtml____.htm"
 
 STATE_DIR = ".state"
 STATE_FILE = os.path.join(STATE_DIR, "alerts_state.json")
+HISTORY_DIR = "history"
+
+
+def record_daily_high(merchant: str, value: float, day: str) -> None:
+	if value < 0.5:
+		return
+
+	os.makedirs(HISTORY_DIR, exist_ok=True)
+	file_path = os.path.join(HISTORY_DIR, f"{merchant_key(merchant)}.csv")
+	daily_values: dict[str, float] = {}
+	if os.path.exists(file_path):
+		with open(file_path, "r", encoding="utf-8", newline="") as history_file:
+			for row in csv.DictReader(history_file):
+				daily_values[row["date"]] = float(row["miles"])
+
+	if day in daily_values and daily_values[day] >= value:
+		return
+	daily_values[day] = value
+	with open(file_path, "w", encoding="utf-8", newline="") as history_file:
+		writer = csv.writer(history_file)
+		writer.writerow(["date", "miles"])
+		for recorded_day, daily_high in sorted(daily_values.items()):
+			writer.writerow([recorded_day, format(daily_high, "g")])
 
 
 def load_dotenv(file_path: str = ".env") -> None:
@@ -180,6 +205,7 @@ def main() -> None:
 
 	with urllib.request.urlopen(request, timeout=30) as response:
 		html = response.read().decode("utf-8", errors="replace")
+	day = datetime.now(timezone.utc).date().isoformat()
 
 	qualifying_lines: list[str] = []
 	met_threshold_lines: list[str] = []
@@ -196,6 +222,7 @@ def main() -> None:
 			print(f"{merchant}: {miles} (unparseable)")
 			continue
 
+		record_daily_high(merchant, value, day)
 		merchant_state = merchant_states.get(merchant, {})
 		should_send, updated_state = should_send_alert(merchant_state, float(minimum_miles), value)
 		merchant_states[merchant] = updated_state
