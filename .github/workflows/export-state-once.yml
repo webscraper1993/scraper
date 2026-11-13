@@ -1,0 +1,35 @@
+name: Export state once
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Exact scraper state cache to export
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore exact cached state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Verify state exists
+        run: test -s .state/alerts_state.json
+
+      - name: Export state
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-alignment
+          path: .state/alerts_state.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
