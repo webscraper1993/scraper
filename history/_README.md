@@ -1,7 +1,8 @@
 # Merchant Rate History
 
 Each merchant has a CSV file (for example, `adidas.csv`) that GitHub displays
-as a table. You can also open or import these files in Excel.
+as a table, with the newest dates first. You can also open or import these
+files in Excel.
 
 | Column | Meaning |
 | --- | --- |

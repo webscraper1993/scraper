@@ -95,7 +95,7 @@ def record_daily_high(merchant: str, value: float, day: str) -> None:
 	with open(file_path, "w", encoding="utf-8", newline="") as history_file:
 		writer = csv.writer(history_file)
 		writer.writerow(["date", "miles"])
-		for recorded_day, daily_high in sorted(daily_values.items()):
+		for recorded_day, daily_high in sorted(daily_values.items(), reverse=True):
 			writer.writerow([recorded_day, format(daily_high, "g")])
 
 
