@@ -26,6 +26,14 @@ eligible observation. Unchanged history does not produce a commit. Manual
 workflow runs also publish updates; local script runs only update local files.
 History starts when this version runs; past dates are not backfilled.
 
+Before a local run, the scraper pulls `origin/main` with `--ff-only` and
+restarts itself if the checkout changed, so the updated script runs. It must
+be on `main`; it will not switch branches. Local edits are preserved when Git
+can pull safely. If the pull fails, the scraper stops and displays the Git
+error. Resolve it manually (for example, commit or stash conflicting changes,
+or resolve diverged commits) before trying again. GitHub Actions uses its
+existing checkout instead of pulling again.
+
 Email alerts retain the existing rules: a rate at or above its configured
 threshold triggers an alert when it first qualifies or returns from below the
 threshold, not on every qualifying run. The 0.5 history cutoff does not change

@@ -4,6 +4,8 @@ import json
 import os
 import re
 import smtplib
+import subprocess
+import sys
 import urllib.request
 from datetime import datetime
 from email.message import EmailMessage
@@ -28,6 +30,51 @@ URL = "https://www.aadvantageeshopping.com/merchantlisthtml____.htm"
 STATE_DIR = ".state"
 STATE_FILE = os.path.join(STATE_DIR, "alerts_state.json")
 HISTORY_DIR = "history"
+
+
+def update_local_checkout() -> None:
+	if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("_AA_SHOPPING_UPDATED") == "1":
+		return
+
+	repo_dir = os.path.dirname(os.path.abspath(__file__))
+
+	def git(*args: str) -> str:
+		try:
+			result = subprocess.run(
+				["git", "-C", repo_dir, *args],
+				check=True, capture_output=True, text=True,
+			)
+		except (OSError, subprocess.CalledProcessError) as error:
+			details = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) and error.stderr else str(error)
+			raise SystemExit(
+				f"Unable to update the local checkout: {details}\n"
+				"Fix the Git error manually (for example, commit or stash conflicting changes, "
+				"or resolve diverged commits), then run the scraper again."
+			) from error
+		return result.stdout.strip()
+
+	branch = git("branch", "--show-current")
+	if branch != "main":
+		raise SystemExit(
+			f"Unable to update: the checkout is on {branch or 'a detached HEAD'}, not main. "
+			"Switch to main manually and run the scraper again."
+		)
+
+	before = git("rev-parse", "HEAD")
+	print("Updating local checkout from origin/main...", flush=True)
+	output = git("pull", "--ff-only", "origin", "main")
+	if output:
+		print(output, flush=True)
+	after = git("rev-parse", "HEAD")
+
+	if before != after:
+		env = os.environ.copy()
+		env["_AA_SHOPPING_UPDATED"] = "1"
+		try:
+			result = subprocess.run([sys.executable, os.path.abspath(__file__), *sys.argv[1:]], env=env)
+		except OSError as error:
+			raise SystemExit(f"Unable to restart the updated scraper: {error}") from error
+		raise SystemExit(result.returncode)
 
 
 def record_daily_high(merchant: str, value: float, day: str) -> None:
@@ -248,4 +295,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+	update_local_checkout()
 	main()
