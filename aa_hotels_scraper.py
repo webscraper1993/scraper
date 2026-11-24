@@ -2,11 +2,15 @@
 # & c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/aa_hotels_scraper.py --capture-curls
 
 # Single city search:
-# c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/aa_hotels_scraper.py "Chicago" --curl-only
+# c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/aa_hotels_scraper.py "New York" --curl-only
+# Capture only New York: python aa_hotels_scraper.py "New York" --capture-curls
+# Capture opens the current hotel site. Log in there, then press Enter in this terminal.
+# Requests are replay-tested before saving; failures preserve existing files and exit nonzero.
 
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
+import math
 import os
 import re
 import shlex
@@ -26,7 +30,8 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-MIN_PPD_DEFAULT  = 30             # minimum LP per dollar to include in results
+MIN_PPD_DEFAULT  = 10             # minimum LP per dollar to include in results
+MAX_PRICE_DEFAULT = 400           # maximum total stay price in USD; None disables the cap
 START_DATE       = "2027/04/04"   # search window start
 #END_DATE         = "2027/02/28"   # search window end
 END_DATE         = "2027/04/07"   # search window end
@@ -279,6 +284,9 @@ def fetch_search_results_payload(curl_cmd, fetch_all_pages=True):
     if not parsed["url"]:
         raise ValueError("No URL found in curl command")
 
+    if urllib.parse.urlsplit(parsed["url"]).path == "/graphql/search":
+        return fetch_graphql_results(parsed, fetch_all_pages)
+
     headers = dict(parsed["headers"])
     if parsed["cookies"]:
         headers["Cookie"] = parsed["cookies"]
@@ -321,6 +329,94 @@ def fetch_search_results_payload(curl_cmd, fetch_all_pages=True):
 
     page_payload["results"] = all_results
     return page_payload
+
+
+def fetch_graphql_results(parsed, fetch_all_pages):
+    body = json.loads(parsed["data"] or "{}")
+    if body.get("operationName") != "citySearch":
+        raise ValueError("Expected a captured citySearch GraphQL request")
+    variables = body["variables"]
+    search = variables["CitySearchRequest"]["searchRequest"]
+    criteria = search["searchCriteria"]
+    headers = {
+        key: value for key, value in parsed["headers"].items()
+        if not key.startswith(":") and key.lower() not in {
+            "accept-encoding", "content-length", "host", "connection",
+        }
+    }
+    if parsed["cookies"]:
+        headers["Cookie"] = parsed["cookies"]
+    headers["Content-Type"] = "application/json"
+    headers["Accept-Encoding"] = "identity"
+    results = []
+    seen = set()
+    page_settings = search["page"]
+    page_settings["pageNumber"] = 1
+    page_settings["pageToken"] = ""
+    for page in range(1, (MAX_PAGES_PER_SEARCH if fetch_all_pages else 1) + 1):
+        page_settings["pageNumber"] = page
+        request = urllib.request.Request(
+            parsed["url"], data=json.dumps(body).encode("utf-8"),
+            headers=headers, method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = json.load(response)
+        if payload.get("errors"):
+            raise ValueError("GraphQL returned errors; no results will be saved")
+        data = (payload.get("data") or {}).get("citySearch")
+        if not isinstance(data, dict) or not isinstance(data.get("properties"), list):
+            raise ValueError("Unrecognized GraphQL search response")
+        info = data["searchResult"]["searchInfo"]
+        if not info.get("isComplete"):
+            raise ValueError("Hotel search is still incomplete; retry the search")
+        properties = data["properties"]
+        added = 0
+        for item in properties:
+            property_id = item["propertyId"]
+            if property_id in seen:
+                continue
+            seen.add(property_id)
+            added += 1
+            pricing = item.get("pricing") or {}
+            if not pricing.get("isAvailable"):
+                continue
+            summary = item["content"]["informationSummary"]
+            offers = pricing.get("offers") or []
+            if not offers or not offers[0].get("roomOffers"):
+                continue
+            room = offers[0]["roomOffers"][0]["room"]
+            prices = room.get("pricing") or []
+            price = next((p["price"] for p in prices if p.get("currency") == criteria["currency"]), None)
+            if price is None:
+                raise ValueError("Search result is missing the requested currency")
+            per_book = price["perBook"]["inclusive"]
+            total = per_book["display"]
+            loyalty = price.get("externalLoyaltyPricing") or {}
+            rewards = (loyalty.get("perBook") or {}).get("pointsToEarn")
+            if rewards is None:
+                raise ValueError("Search result is missing per-stay loyalty earnings")
+            scenario = [
+                offer.get("externalPartnerProgramCode")
+                for offer in (per_book.get("loyaltyOfferSummary") or {}).get("offers", [])
+                if (offer.get("earn") or {}).get("points") == rewards
+            ]
+            results.append({
+                "hotel": {
+                    "name": summary["displayName"],
+                    "address": {"city": summary["address"]["city"]["name"]},
+                },
+                "totalPrice": total,
+                "rewards": rewards,
+                "mileageScenario": ", ".join(filter(None, scenario)),
+            })
+        if not properties or not added or len(seen) >= info["totalFilteredHotels"]:
+            break
+    start = parse_date_input(criteria["localCheckInDate"])
+    return {
+        "checkInDate": start.isoformat(),
+        "checkOutDate": (start + timedelta(days=criteria["los"])).isoformat(),
+        "results": results,
+    }
 
 
 def parse_city_hint_from_curl(curl_cmd):
@@ -418,6 +514,10 @@ def parse_cookie_header(curl_cmd):
 def check_session_health(curl_cmd):
     warnings = []
     parsed = parse_curl(curl_cmd)
+    if urllib.parse.urlsplit(parsed.get("url") or "").path == "/graphql/search":
+        if not parsed["data"]:
+            warnings.append("GraphQL cURL is missing its POST body; run --capture-curls again.")
+        return warnings
     headers = parsed.get("headers", {})
     xsrf = headers.get("x-xsrf-token") or headers.get("X-XSRF-TOKEN") or headers.get("x-xsrf-token")
     if not xsrf:
@@ -484,6 +584,47 @@ def rewrite_curl_for_city(base_curl, city, start_date, end_date, place_id=None, 
     parsed = parse_curl(base_curl)
     if not parsed.get("url"):
         return base_curl
+
+    if urllib.parse.urlsplit(parsed["url"]).path == "/graphql/search":
+        body = json.loads(parsed["data"] or "{}")
+        variables = body["variables"]
+        city_request = variables["CitySearchRequest"]
+        search = city_request["searchRequest"]
+        start = parse_date_input(start_date)
+        end = parse_date_input(end_date)
+        if end <= start:
+            raise ValueError("check-out must be after check-in")
+        if place_id:
+            city_id = int(place_id.split("|")[-1])
+            city_request["cityId"] = city_id
+            variables["ContentSummaryRequest"]["context"]["searchCriteria"]["cityId"] = city_id
+        criteria = search["searchCriteria"]
+        criteria["checkInDate"] = (
+            datetime.combine(start, datetime.min.time()).astimezone(timezone.utc)
+            .isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        )
+        criteria["localCheckInDate"] = start.isoformat()
+        criteria["los"] = (end - start).days
+        criteria["bookingDate"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        search["page"]["pageNumber"] = 1
+        search["page"]["pageToken"] = ""
+        search_id = str(uuid.uuid4())
+        search["searchContext"]["searchId"] = search_id
+        variables["ContentSummaryRequest"]["context"]["occupancy"]["checkIn"] = criteria["checkInDate"]
+        pricing_request = variables["PricingSummaryRequest"]
+        pricing_request["context"]["clientInfo"]["searchId"] = search_id
+        pricing_request["pricing"].update({
+            "checkIn": criteria["checkInDate"],
+            "checkout": (
+                datetime.combine(end, datetime.min.time()).astimezone(timezone.utc)
+                .isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            ),
+            "localCheckInDate": start.isoformat(),
+            "localCheckoutDate": end.isoformat(),
+            "bookingDate": criteria["bookingDate"],
+        })
+        parsed["data"] = json.dumps(body)
+        return serialize_curl(parsed)
 
     url_parts = urllib.parse.urlparse(parsed["url"])
     query = urllib.parse.parse_qs(url_parts.query, keep_blank_values=True)
@@ -567,11 +708,12 @@ def search_city_with_curl(city, start_date, end_date, target_lp, mileage_value, 
         log(f"  {start_date}: {city}")
         payload = fetch_search_results_payload(aa_hotels_curl, fetch_all_pages=fetch_all_pages)
     except urllib.error.HTTPError as exc:
-        log(f"cURL request failed: HTTP {exc.code} for {city}. This usually means expired session/cookies or invalid city/place/date pairing.")
-        return []
+        raise RuntimeError(
+            f"Hotel request failed: HTTP {exc.code} for {city}. "
+            "No results were saved for this search. Session expiry is not confirmed."
+        ) from exc
     except Exception as exc:
-        log(f"cURL request failed: {exc}")
-        return []
+        raise RuntimeError(f"Hotel request failed for {city}: {exc}") from exc
 
     check_in = payload.get("checkInDate") if isinstance(payload, dict) else None
     check_out = payload.get("checkOutDate") if isinstance(payload, dict) else None
@@ -638,6 +780,8 @@ def search_city_with_curl(city, start_date, end_date, target_lp, mileage_value, 
                 "Stay LP PPD": stay_lp_ppd,
                 "Base Rewards": base_rewards,
             }
+            if item.get("mileageScenario"):
+                row["Mileage Scenario"] = item["mileageScenario"]
             rows.append(row)
 
     if rows:
@@ -829,89 +973,120 @@ def build_capture_driver():
     return webdriver.Chrome(options=options)
 
 
+def serialize_curl(parsed):
+    parts = ["curl", parsed["url"]]
+    for key, value in parsed["headers"].items():
+        if not key.startswith(":") and key.lower() not in {
+            "cookie", "content-length", "accept-encoding", "host", "connection",
+        }:
+            parts.extend(["-H", f"{key}: {value}"])
+    if parsed["cookies"]:
+        parts.extend(["-b", parsed["cookies"]])
+    if parsed["data"] is not None:
+        parts.extend(["--data-raw", parsed["data"]])
+    parts.extend(["-X", parsed["method"]])
+    return shlex.join(parts)
+
+
 def extract_search_request_from_logs(driver):
-    """Pull the most recent searchRequest network call from Chrome performance logs."""
-    try:
-        logs = driver.get_log("performance")
-    except Exception:
-        return None
-
+    """Capture supported hotel searches, including POST data and browser cookies."""
+    logs = driver.get_log("performance")
     for entry in reversed(logs):
-        try:
-            msg = json.loads(entry["message"])["message"]
-            if msg.get("method") != "Network.requestWillBeSent":
-                continue
-            req = msg["params"]["request"]
-            if "searchRequest" not in req.get("url", ""):
-                continue
-
-            url = req["url"]
-            headers = req.get("headers", {})
-            method = req.get("method", "GET")
-
-            cookie_str = headers.pop("cookie", headers.pop("Cookie", ""))
-            header_flags = " ".join(f'-H "{k}: {v}"' for k, v in headers.items() if k.lower() not in ("cookie",))
-            cookie_flag = f' -b "{cookie_str}"' if cookie_str else ""
-            curl_cmd = f"curl '{url}' {header_flags}{cookie_flag}"
-            return curl_cmd
-        except Exception:
+        msg = json.loads(entry["message"])["message"]
+        if msg.get("method") != "Network.requestWillBeSent":
             continue
+        req = msg["params"]["request"]
+        url = urllib.parse.urlsplit(req.get("url", ""))
+        if url.hostname not in {"www.aadvantagehotels.com", "search.aadvantagehotels.com"}:
+            continue
+        if url.path not in {"/graphql/search", "/rest/aadvantage-hotels/searchRequest"}:
+            continue
+        data = req.get("postData")
+        if url.path == "/graphql/search":
+            if not data and req.get("hasPostData"):
+                data = driver.execute_cdp_cmd(
+                    "Network.getRequestPostData", {"requestId": msg["params"]["requestId"]},
+                )["postData"]
+            if not data:
+                raise ValueError("Captured GraphQL request has no POST body")
+            if json.loads(data).get("operationName") != "citySearch":
+                continue
+        cookies = driver.execute_cdp_cmd(
+            "Network.getCookies", {"urls": [req["url"]]},
+        )["cookies"]
+        return serialize_curl({
+            "url": req["url"], "headers": req.get("headers", {}),
+            "method": req.get("method", "GET"), "data": data,
+            "cookies": "; ".join(f"{cookie['name']}={cookie['value']}" for cookie in cookies),
+        })
     return None
 
 
 def capture_city_curls(cities, city_place_ids, city_curl_file_map, city_search_queries=None):
-    """Open browser, wait for user login, then capture searchRequest per city."""
+    """Capture current search requests after the user logs in."""
     driver = build_capture_driver()
-    log("Browser opened. Please log in to aadvantagehotels.com now.")
-    driver.get("https://www.aadvantagehotels.com")
+    failed = []
+    try:
+        log("Browser opened. Log in to search.aadvantagehotels.com in this Chrome window.")
+        driver.get("https://search.aadvantagehotels.com/")
+        try:
+            input("\n[ACTION REQUIRED] After logging in, press Enter in this terminal to capture searches...\n")
+        except EOFError as exc:
+            raise RuntimeError("Capture requires an interactive terminal. No requests were saved.") from exc
 
-    input("\n[ACTION REQUIRED] Log in to aadvantagehotels.com in the browser, then press Enter here to continue...\n")
-    log("Starting city capture...")
-
-    today_checkin = datetime.today().strftime("%m/%d/%Y")
-    tomorrow_checkout = (datetime.today() + timedelta(days=1)).strftime("%m/%d/%Y")
-
-    for city in cities:
-        place_id = city_place_ids.get(city, "")
-        # Use explicit query hint to avoid ambiguous city names (e.g. Las Vegas NV vs Argentina).
-        query_label = (city_search_queries or {}).get(city) or f"{city}, United States"
-        query = urllib.parse.quote(query_label)
-        search_url = (
-            f"https://www.aadvantagehotels.com/search?"
-            f"adults=1&checkIn={urllib.parse.quote(today_checkin)}"
-            f"&checkOut={urllib.parse.quote(tomorrow_checkout)}"
-            f"&children=0&currency=USD&language=en&locationType=CITY"
-            f"&mode=earn&numberOfChildren=0&placeId={urllib.parse.quote(place_id)}"
-            f"&program=aadvantage&promotion=&query={query}&rooms=1"
-            f"&searchId={uuid.uuid4()}&sort=milesHighest&source=AGODA"
-        )
-        log(f"Navigating to {city} search page...")
-        driver.get(search_url)
-
-        curl_cmd = None
-        for _ in range(30):
-            time.sleep(1)
-            curl_cmd = extract_search_request_from_logs(driver)
-            if curl_cmd:
-                break
-
-        if not curl_cmd:
-            log(f"WARNING: could not capture searchRequest for {city}. Try again or capture manually.")
-            continue
-
-        out_path = city_curl_file_map.get(city)
-        if not out_path:
-            out_path = f"curls/curl_{city.replace(' ', '')}.txt"
-        if not os.path.isabs(out_path):
-            out_path = os.path.join(BASE_DIR, out_path)
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-        with open(out_path, "w", encoding="utf-8") as fh:
-            fh.write(curl_cmd)
-        log(f"Saved {city} cURL to {out_path}")
-
-    driver.quit()
-    log("All cities captured. You can now run the scraper normally.")
+        checkin = datetime.today().date() + timedelta(days=1)
+        for city in cities:
+            city_id = city_place_ids.get(city, "").removeprefix("AGODA_CITY|")
+            if not city_id.isdigit():
+                log(f"Cannot capture {city}: missing numeric city ID.")
+                failed.append(city)
+                continue
+            query = urllib.parse.urlencode({
+                "city": city_id, "adults": 1, "rooms": 1, "children": 0,
+                "currency": "USD", "checkIn": checkin.isoformat(),
+                "checkOut": (checkin + timedelta(days=1)).isoformat(),
+                "textToSearch": (city_search_queries or {}).get(city, city),
+                "sort": "pointsearned", "loyaltySearchType": "EARN",
+            })
+            driver.get_log("performance")
+            log(f"Capturing {city} on the current hotel search site...")
+            driver.get(f"https://search.aadvantagehotels.com/search?{query}")
+            curl_cmd = None
+            for _ in range(30):
+                time.sleep(1)
+                curl_cmd = extract_search_request_from_logs(driver)
+                if curl_cmd:
+                    break
+            if not curl_cmd:
+                log(f"Capture FAILED for {city}: no supported search request. Existing file was NOT updated.")
+                failed.append(city)
+                continue
+            parsed = parse_curl(curl_cmd)
+            if urllib.parse.urlsplit(parsed["url"]).path == "/graphql/search":
+                captured_city = json.loads(parsed["data"])["variables"]["CitySearchRequest"]["cityId"]
+                if int(captured_city) != int(city_id):
+                    log(f"Capture FAILED for {city}: request was for a different city. Existing file was NOT updated.")
+                    failed.append(city)
+                    continue
+            try:
+                fetch_search_results_payload(curl_cmd, fetch_all_pages=False)
+            except (urllib.error.URLError, ValueError, KeyError, TimeoutError) as exc:
+                status = f"HTTP {exc.code}" if isinstance(exc, urllib.error.HTTPError) else type(exc).__name__
+                log(f"Capture FAILED for {city}: replay validation returned {status}. Existing file was NOT updated.")
+                failed.append(city)
+                continue
+            out_path = city_curl_file_map.get(city) or f"curls/curl_{city.replace(' ', '')}.txt"
+            if not os.path.isabs(out_path):
+                out_path = os.path.join(BASE_DIR, out_path)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as fh:
+                fh.write(curl_cmd)
+            log(f"Saved {city} cURL to {out_path} (API replay verified)")
+    finally:
+        driver.quit()
+    if failed:
+        raise RuntimeError(f"Capture failed for: {', '.join(failed)}. Failed captures left existing files unchanged.")
+    log(f"Captured {len(cities)} city request(s). Session files contain credentials; do not share or commit them.")
 
 
 def acquire_file_lock(lock_path, timeout_seconds=30, poll_seconds=0.1):
@@ -973,7 +1148,7 @@ def rows_for_output(rows):
     return output_rows
 
 
-def write_json(rows, output_path):
+def write_json(rows, output_path, max_price=None):
     lock_path = f"{output_path}.lock"
     acquire_file_lock(lock_path)
     try:
@@ -988,6 +1163,7 @@ def write_json(rows, output_path):
                 existing_rows = []
 
         merged_rows = merge_unique_rows(existing_rows, rows)
+        merged_rows = filter_rows_by_max_price(merged_rows, max_price)
         merged_rows = rows_for_output(merged_rows)
         merged_rows = sort_rows_by_ppd_desc(merged_rows)
 
@@ -1013,6 +1189,16 @@ def filter_rows_by_min_ppd(rows, min_ppd):
     return filtered
 
 
+def filter_rows_by_max_price(rows, max_price):
+    if max_price is None:
+        return rows
+    return [
+        row for row in rows
+        if isinstance(row.get("Total Price ($)"), (int, float))
+        and row["Total Price ($)"] <= max_price
+    ]
+
+
 def sort_rows_by_ppd_desc(rows):
     return sorted(
         rows,
@@ -1021,14 +1207,15 @@ def sort_rows_by_ppd_desc(rows):
     )
 
 
-def write_progress_json(all_rows, window_rows, output_json, min_ppd, fetch_all_pages=True):
-    filtered_rows = filter_rows_by_min_ppd(all_rows, min_ppd)
+def write_progress_json(all_rows, window_rows, output_json, min_ppd, fetch_all_pages=True, max_price=None):
+    filtered_rows = filter_rows_by_max_price(filter_rows_by_min_ppd(all_rows, min_ppd), max_price)
     sorted_rows = sort_rows_by_ppd_desc(filtered_rows)
-    write_json(sorted_rows, output_json)
-    window_qualifying = filter_rows_by_min_ppd(window_rows, min_ppd)
+    write_json(sorted_rows, output_json, max_price=max_price)
+    window_qualifying = filter_rows_by_max_price(filter_rows_by_min_ppd(window_rows, min_ppd), max_price)
     fetch_label = f"top {MAX_PAGES_PER_SEARCH} pages" if fetch_all_pages else "first page"
     log(f"    fetched ({fetch_label}): {len(window_rows)}")
-    log(f"    filtered (>= {min_ppd} PPD): {len(window_qualifying)}")
+    price_label = f", total price <= ${max_price:g}" if max_price is not None else ""
+    log(f"    filtered (>= {min_ppd} PPD{price_label}): {len(window_qualifying)}")
     log(f"    cumulative count: {len(filtered_rows)} (across all cities)")
 
 
@@ -1049,6 +1236,7 @@ if __name__ == "__main__":
     parser.add_argument("--start-date", help="Override start_date (format: YYYY/MM/DD)")
     parser.add_argument("--end-date", help="Override end_date (format: YYYY/MM/DD)")
     parser.add_argument("--min-ppd", type=float, help="Override min LP PPD threshold")
+    parser.add_argument("--max-price", type=float, help=f"Maximum total stay price in USD (inclusive; default: {MAX_PRICE_DEFAULT})")
     args = parser.parse_args()
 
     config = {**json.loads(INFRA_CONFIG), **json.loads(CONFIG)}
@@ -1096,7 +1284,11 @@ if __name__ == "__main__":
     if args.capture_curls:
         city_curl_file_map = parse_string_map(config.get("city_curl_files"))
         city_search_queries = parse_string_map(config.get("city_search_queries"))
-        capture_city_curls(cities, city_place_ids, city_curl_file_map, city_search_queries=city_search_queries)
+        try:
+            capture_city_curls(cities, city_place_ids, city_curl_file_map, city_search_queries=city_search_queries)
+        except (RuntimeError, ValueError, urllib.error.URLError) as exc:
+            log(f"Capture failed: {exc}")
+            sys.exit(1)
         sys.exit(0)
 
     coverage_issues = validate_city_curl_coverage(cities, aa_hotels_curl, city_curls, city_place_ids)
@@ -1150,6 +1342,17 @@ if __name__ == "__main__":
     min_ppd = float(config.get("min_ppd", MIN_PPD_DEFAULT))
     if args.min_ppd is not None:
         min_ppd = args.min_ppd
+    max_price = config.get("max_price", MAX_PRICE_DEFAULT)
+    if args.max_price is not None:
+        max_price = args.max_price
+    if max_price is not None:
+        try:
+            max_price = float(max_price)
+        except (TypeError, ValueError):
+            parser.error("max price must be a finite nonnegative number")
+        if not math.isfinite(max_price) or max_price < 0:
+            parser.error("max price must be a finite nonnegative number")
+    price_label = f", total price <= ${max_price:g}" if max_price is not None else ""
 
     all_rows = []
     if use_curl_only:
@@ -1179,15 +1382,19 @@ if __name__ == "__main__":
                 else:
                     city_curl = rewrite_curl_for_city(shared_or_city_curl, city, window_start, window_end, rewrite_query=False)
 
-                rows = search_city_with_curl(city, window_start, window_end, target_lp, mileage_value, city_curl, fetch_all_pages=fetch_all_pages)
+                try:
+                    rows = search_city_with_curl(city, window_start, window_end, target_lp, mileage_value, city_curl, fetch_all_pages=fetch_all_pages)
+                except RuntimeError as exc:
+                    log(str(exc))
+                    sys.exit(1)
                 if rows:
                     all_rows.extend(rows)
-                    write_progress_json(all_rows, rows, output_json, min_ppd, fetch_all_pages=fetch_all_pages)
+                    write_progress_json(all_rows, rows, output_json, min_ppd, fetch_all_pages=fetch_all_pages, max_price=max_price)
 
         if all_rows:
-            final_rows = sort_rows_by_ppd_desc(filter_rows_by_min_ppd(all_rows, min_ppd))
-            write_json(final_rows, output_json)
-            log(f"Saved {len(final_rows)} filtered row(s) (>= {min_ppd} PPD) to {output_json}")
+            final_rows = sort_rows_by_ppd_desc(filter_rows_by_max_price(filter_rows_by_min_ppd(all_rows, min_ppd), max_price))
+            write_json(final_rows, output_json, max_price=max_price)
+            log(f"Saved {len(final_rows)} filtered row(s) (>= {min_ppd} PPD{price_label}) to {output_json}")
         else:
             log("No results parsed from cURL response.")
         sys.exit(0)
@@ -1215,7 +1422,11 @@ if __name__ == "__main__":
                     break
 
             if city_curl:
-                rows = search_city_with_curl(city, window_start, window_end, target_lp, mileage_value, city_curl, fetch_all_pages=fetch_all_pages)
+                try:
+                    rows = search_city_with_curl(city, window_start, window_end, target_lp, mileage_value, city_curl, fetch_all_pages=fetch_all_pages)
+                except RuntimeError as exc:
+                    log(str(exc))
+                    sys.exit(1)
 
             if not rows:
                 if not city_had_error:
@@ -1227,13 +1438,13 @@ if __name__ == "__main__":
                 if not row.get("city") and not row.get("City"):
                     row["city"] = city
             all_rows.extend(rows)
-            write_progress_json(all_rows, rows, output_json, min_ppd, fetch_all_pages=fetch_all_pages)
+            write_progress_json(all_rows, rows, output_json, min_ppd, fetch_all_pages=fetch_all_pages, max_price=max_price)
             time.sleep(1)
 
         if all_rows:
-            final_rows = sort_rows_by_ppd_desc(filter_rows_by_min_ppd(all_rows, min_ppd))
-            write_json(final_rows, output_json)
-            log(f"Saved {len(final_rows)} filtered row(s) (>= {min_ppd} PPD) to {output_json}")
+            final_rows = sort_rows_by_ppd_desc(filter_rows_by_max_price(filter_rows_by_min_ppd(all_rows, min_ppd), max_price))
+            write_json(final_rows, output_json, max_price=max_price)
+            log(f"Saved {len(final_rows)} filtered row(s) (>= {min_ppd} PPD{price_label}) to {output_json}")
         else:
             log("No results parsed.")
     
