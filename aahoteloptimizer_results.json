@@ -1,0 +1,55 @@
+{
+  "row_count": 5,
+  "results": [
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "Arthouse Hotel",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 277.57,
+      "Total Stay LP": 6000.0,
+      "Stay LP PPD": 21.6162,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "NH Collection New York Madison Avenue",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 299.13,
+      "Total Stay LP": 4200.0,
+      "Stay LP PPD": 14.0407,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "Court Square Hotel Long Island City New York , Belvilla District 6 Formerly Sonder",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 241.01,
+      "Total Stay LP": 3000.0,
+      "Stay LP PPD": 12.4476,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "Dutch Hotel Long Island City New York , Belvilla District 6 Formerly Sonder",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 249.6,
+      "Total Stay LP": 3100.0,
+      "Stay LP PPD": 12.4199,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "The Wall Street Inn",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 257.56,
+      "Total Stay LP": 3000.0,
+      "Stay LP PPD": 11.6478,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    }
+  ]
+}
