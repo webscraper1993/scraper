@@ -31,7 +31,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 MIN_PPD_DEFAULT  = 10             # minimum LP per dollar to include in results
-MAX_PRICE_DEFAULT = 400           # maximum total stay price in USD; None disables the cap
+MAX_PRICE_DEFAULT = 300           # maximum total stay price in USD; None disables the cap
 START_DATE       = "2027/04/04"   # search window start
 #END_DATE         = "2027/02/28"   # search window end
 END_DATE         = "2027/04/07"   # search window end
