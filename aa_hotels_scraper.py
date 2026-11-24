@@ -27,9 +27,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 MIN_PPD_DEFAULT  = 30             # minimum LP per dollar to include in results
-START_DATE       = "2026/08/13"   # search window start
+START_DATE       = "2027/04/04"   # search window start
 #END_DATE         = "2027/02/28"   # search window end
-END_DATE         = "2026/12/31"   # search window end
+END_DATE         = "2027/04/07"   # search window end
 
 #START_DATE       = "2026/12/01"   # search window start
 #END_DATE         = "2026/12/01"   # search window end
@@ -734,52 +734,6 @@ def print_best_matches(rows, city, min_ppd=MIN_PPD_DEFAULT):
     return [row for _, row in ranked]
 
 
-def generate_demo_results(city, start_date, end_date):
-    """Generate demo hotel results when browser/curl unavailable."""
-    log(f"Generating demo results for {city} ({start_date} to {end_date})")
-    
-    # Sample NYC hotels with realistic LP earning potential
-    demo_hotels = {
-        "New York": [
-            {
-                "Hotel Name": "The Plaza Hotel",
-                "City": "New York",
-                "Check-in": start_date,
-                "Check-out": end_date,
-                "Total Stay LP": 50000,
-                "Stay LP PPD": 125,
-                "Base+Card LP PPD": 125,
-                "Total Price ($)": 400,
-                "url": "https://www.aadvantagehotels.com/en/property/10001"
-            },
-            {
-                "Hotel Name": "The Pierre",
-                "City": "New York",
-                "Check-in": start_date,
-                "Check-out": end_date,
-                "Total Stay LP": 45000,
-                "Stay LP PPD": 112,
-                "Base+Card LP PPD": 112,
-                "Total Price ($)": 400,
-                "url": "https://www.aadvantagehotels.com/en/property/10002"
-            },
-            {
-                "Hotel Name": "Peninsula New York",
-                "City": "New York",
-                "Check-in": start_date,
-                "Check-out": end_date,
-                "Total Stay LP": 60000,
-                "Stay LP PPD": 150,
-                "Base+Card LP PPD": 150,
-                "Total Price ($)": 400,
-                "url": "https://www.aadvantagehotels.com/en/property/10003"
-            }
-        ]
-    }
-    
-    return demo_hotels.get(city, [])
-
-
 def search_city(driver, city, start_date, end_date, target_lp, mileage_value, aa_hotels_curl, min_ppd=MIN_PPD_DEFAULT):
     log(f"Opening optimizer UI for {city}")
     driver.get("https://aahoteloptimizer.streamlit.app/~/+/")
@@ -1162,17 +1116,8 @@ if __name__ == "__main__":
             log("Session/token warnings:")
             for warning in session_warnings:
                 log(f"- {warning}")
-            # If session is invalid, clear curls to force Selenium fallback
-            log("Session invalid; will skip cURL and use Selenium instead.")
-            city_curls.clear()
-            aa_hotels_curl = ""
 
     use_curl_only = args.curl_only or parse_bool(config.get("use_curl_only"), default=False) or parse_bool(os.environ.get("USE_CURL_ONLY"), default=False)
-    
-    # Force curl-only mode off if no valid curl is provided, to allow Selenium fallback
-    if use_curl_only and not aa_hotels_curl and not city_curls:
-        log("cURL-only mode was requested but no valid cURL found; switching to Selenium mode.")
-        use_curl_only = False
     fetch_all_pages = parse_bool(config.get("all_pages"), default=True)
     if args.all_pages:
         fetch_all_pages = True
@@ -1272,34 +1217,18 @@ if __name__ == "__main__":
             if city_curl:
                 rows = search_city_with_curl(city, window_start, window_end, target_lp, mileage_value, city_curl, fetch_all_pages=fetch_all_pages)
 
-            # If curl didn't work or wasn't available, fall back to Selenium
             if not rows:
                 if not city_had_error:
-                    if city_curl:
-                        log(f"cURL failed for {city}; falling back to Selenium browser.")
-                    else:
-                        log(f"No cURL available for {city}; using Selenium browser.")
+                    log(f"cURL failed or returned no results for {city} — check curl file / session. Skipping city.")
                     city_had_error = True
-                    
-                    # Use Selenium as fallback
-                    try:
-                        driver = build_driver(headless=headless)
-                        rows = search_city(driver, city, window_start, window_end, target_lp, mileage_value, aa_hotels_curl, min_ppd=min_ppd)
-                        driver.quit()
-                    except Exception as e:
-                        log(f"Selenium search for {city} failed: {e}")
-                        log(f"Using demo results for {city}")
-                        rows = generate_demo_results(city, window_start, window_end)
-                else:
-                    break
+                break
 
-            if rows:
-                for row in rows:
-                    if not row.get("city") and not row.get("City"):
-                        row["city"] = city
-                all_rows.extend(rows)
-                write_progress_json(all_rows, rows, output_json, min_ppd, fetch_all_pages=fetch_all_pages)
-                time.sleep(1)
+            for row in rows:
+                if not row.get("city") and not row.get("City"):
+                    row["city"] = city
+            all_rows.extend(rows)
+            write_progress_json(all_rows, rows, output_json, min_ppd, fetch_all_pages=fetch_all_pages)
+            time.sleep(1)
 
         if all_rows:
             final_rows = sort_rows_by_ppd_desc(filter_rows_by_min_ppd(all_rows, min_ppd))
