@@ -1,5 +1,5 @@
 {
-  "row_count": 5,
+  "row_count": 9,
   "results": [
     {
       "City": "New York (NY)",
@@ -9,6 +9,16 @@
       "Total Price ($)": 277.57,
       "Total Stay LP": 6000.0,
       "Stay LP PPD": 21.6162,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "Arthouse Hotel",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 282.24,
+      "Total Stay LP": 5500.0,
+      "Stay LP PPD": 19.487,
       "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
     },
     {
@@ -43,12 +53,42 @@
     },
     {
       "City": "New York (NY)",
+      "Hotel Name": "The Moore, New York City, a Member of Design Hotels",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 295.85,
+      "Total Stay LP": 3500.0,
+      "Stay LP PPD": 11.8303,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
       "Hotel Name": "The Wall Street Inn",
       "Check In": "2027-04-04",
       "Check Out": "2027-04-05",
       "Total Price ($)": 257.56,
       "Total Stay LP": 3000.0,
       "Stay LP PPD": 11.6478,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "The Wall Street Inn",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 257.56,
+      "Total Stay LP": 2900.0,
+      "Stay LP PPD": 11.2595,
+      "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
+    },
+    {
+      "City": "New York (NY)",
+      "Hotel Name": "Eurostars Hotel Wall Street",
+      "Check In": "2027-04-04",
+      "Check Out": "2027-04-05",
+      "Total Price ($)": 248.54,
+      "Total Stay LP": 2700.0,
+      "Stay LP PPD": 10.8634,
       "Mileage Scenario": "EXECUTIVE_PLATINUM&YES"
     }
   ]

@@ -1,9 +1,10 @@
 ﻿# To save/capture updated curls, run:
-# & c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/aa_hotels_scraper.py --capture-curls
+# & c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/scraper_AAHotels.py --capture-curls
+# & c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/scraper_AAHotels.py "New York" --capture-curls
 
 # Single city search:
-# c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/aa_hotels_scraper.py "New York" --curl-only
-# Capture only New York: python aa_hotels_scraper.py "New York" --capture-curls
+# c:/Users/galluzzi-tomas/scraper/.venv-1/Scripts/python.exe c:/Users/galluzzi-tomas/scraper/scraper_AAHotels.py "New York" --curl-only
+# Capture only New York: python scraper_AAHotels.py "New York" --capture-curls
 # Capture opens the current hotel site. Log in there, then press Enter in this terminal.
 # Requests are replay-tested before saving; failures preserve existing files and exit nonzero.
 
@@ -57,7 +58,7 @@ CONFIG = """
                 "Madrid",
                 "Mexico City"
         ],
-    "output_json": "aahoteloptimizer_results.json",
+    "output_json": "results/aa_hotel_optimizer_results.json",
 
     "aa_hotels_curl": ""
 }
@@ -1149,6 +1150,10 @@ def rows_for_output(rows):
 
 
 def write_json(rows, output_path, max_price=None):
+    output_directory = os.path.dirname(output_path)
+    if output_directory:
+        os.makedirs(output_directory, exist_ok=True)
+
     lock_path = f"{output_path}.lock"
     acquire_file_lock(lock_path)
     try:
@@ -1265,7 +1270,7 @@ if __name__ == "__main__":
     headless = parse_bool(config.get("headless", False), default=False)
     if args.headless:
         headless = True
-    output_json = config.get("output_json", "aahotel_results.json")
+    output_json = config.get("output_json", "results/aa_hotel_optimizer_results.json")
     aa_hotels_curl = config.get("aa_hotels_curl", "")
     if os.environ.get("AA_HOTELS_CURL"):
         aa_hotels_curl = os.environ.get("AA_HOTELS_CURL", "")
